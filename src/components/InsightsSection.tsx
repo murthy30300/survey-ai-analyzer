@@ -1,5 +1,4 @@
-
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +16,8 @@ import {
   BarChart3,
   Clock
 } from "lucide-react";
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 
 const API_BASE = 'https://mngp6096cl.execute-api.us-east-1.amazonaws.com/Prod';
 
@@ -53,6 +54,8 @@ const InsightsSection = ({ userId }: InsightsSectionProps) => {
   const [selectedSurvey, setSelectedSurvey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [polling, setPolling] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const pdfRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (userId) {
@@ -105,6 +108,59 @@ const InsightsSection = ({ userId }: InsightsSectionProps) => {
     const survey = surveyHistory.find(s => s.upload_id === uploadId);
     if (survey && survey.status !== 'analyzed') {
       setPolling(true);
+    }
+  };
+
+  const handleExportPDF = async () => {
+    if (!pdfRef.current || !selectedSurvey) return;
+
+    try {
+      setExportLoading(true);
+      
+      // Create canvas from the PDF content
+      const canvas = await html2canvas(pdfRef.current, {
+        useCORS: true,
+        scale: 2,
+        logging: false,
+        allowTaint: true,
+        backgroundColor: '#ffffff'
+      });
+
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'px',
+        format: 'a4',
+      });
+
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+      // If content is taller than one page, handle multiple pages
+      if (pdfHeight > pdf.internal.pageSize.getHeight()) {
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        let heightLeft = pdfHeight;
+        let position = 0;
+
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+        heightLeft -= pageHeight;
+
+        while (heightLeft >= 0) {
+          position = heightLeft - pdfHeight;
+          pdf.addPage();
+          pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+          heightLeft -= pageHeight;
+        }
+      } else {
+        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      }
+
+      pdf.save(`Survey_Report_${selectedSurvey}.pdf`);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+    } finally {
+      setExportLoading(false);
     }
   };
 
@@ -191,9 +247,9 @@ const InsightsSection = ({ userId }: InsightsSectionProps) => {
         </CardContent>
       </Card>
 
-      {/* Detailed Insights */}
+      {/* Detailed Insights - Wrapped in PDF ref */}
       {selectedSurvey && currentSurvey && (
-        <div className="space-y-6">
+        <div ref={pdfRef} className="space-y-6 pdf-content">
           {/* Overview */}
           <Card>
             <CardHeader>
@@ -204,9 +260,14 @@ const InsightsSection = ({ userId }: InsightsSectionProps) => {
                     {currentSurvey.status === 'analyzed' ? 'Analysis completed' : 'Processing in progress'} • Uploaded on {currentSurvey.timestamp}
                   </CardDescription>
                 </div>
-                <Button variant="outline" size="sm" disabled={!currentInsight}>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleExportPDF}
+                  disabled={!currentInsight || exportLoading}
+                >
                   <Download className="h-4 w-4 mr-2" />
-                  Export Report
+                  {exportLoading ? 'Generating...' : 'Export Report'}
                 </Button>
               </div>
             </CardHeader>
@@ -242,161 +303,136 @@ const InsightsSection = ({ userId }: InsightsSectionProps) => {
           </Card>
 
           {currentInsight && (
-            <Tabs defaultValue="summary" className="space-y-4">
-              <TabsList className="grid w-full grid-cols-4">
-                <TabsTrigger value="summary">Summary</TabsTrigger>
-                <TabsTrigger value="pain-points">Pain Points</TabsTrigger>
-                <TabsTrigger value="positive">Positive Aspects</TabsTrigger>
-                <TabsTrigger value="actions">Action Items</TabsTrigger>
-              </TabsList>
+            <div className="pdf-tabs-content">
+              {/* Summary */}
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <MessageSquare className="h-5 w-5" />
+                    Analysis Overview
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div>
+                      <h4 className="font-semibold mb-2">Key Metrics</h4>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>Average Satisfaction: {currentInsight.avg_satisfaction?.toFixed(1)}/5.0</div>
+                        <div>Response Count: {currentInsight.response_count}</div>
+                        <div>Overall Sentiment: {currentInsight.overall_sentiment}</div>
+                        <div>Completed Analyses: {currentInsight.completed_analyses}</div>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-              <TabsContent value="summary" className="space-y-4">
+              {/* Pain Points */}
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-red-500" />
+                    Areas for Improvement
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {currentInsight.pain_points && currentInsight.pain_points.length > 0 ? (
+                      currentInsight.pain_points.map((point, index) => (
+                        <div key={index} className="flex items-start gap-3 p-4 border-l-4 border-red-200 bg-red-50 rounded-r-lg">
+                          <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5 flex-shrink-0" />
+                          <p className="text-gray-700">{point}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-gray-500 text-center py-4">No specific pain points identified</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Positive Aspects */}
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <ThumbsUp className="h-5 w-5 text-green-500" />
+                    What's Working Well
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {currentInsight.positive_aspects && currentInsight.positive_aspects.length > 0 ? (
+                      currentInsight.positive_aspects.map((aspect, index) => (
+                        <div key={index} className="flex items-start gap-3 p-4 border-l-4 border-green-200 bg-green-50 rounded-r-lg">
+                          <CheckCircle className="h-5 w-5 text-green-500 mt-0.5 flex-shrink-0" />
+                          <p className="text-gray-700">{aspect}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-gray-500 text-center py-4">No specific positive aspects identified</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Action Items */}
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Lightbulb className="h-5 w-5 text-blue-500" />
+                    Recommended Actions
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {currentInsight.top_insights && currentInsight.top_insights.length > 0 ? (
+                      currentInsight.top_insights.map((insight, index) => (
+                        <div key={index} className="flex items-start gap-3 p-4 border-l-4 border-blue-200 bg-blue-50 rounded-r-lg">
+                          <Lightbulb className="h-5 w-5 text-blue-500 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-gray-700">{insight}</p>
+                            <div className="mt-2 flex gap-2">
+                              <Badge variant="outline" className="text-xs">AI Insight</Badge>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-gray-500 text-center py-4">No specific insights available</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Topic Performance */}
+              {currentInsight.topic_sentiment_map && (
                 <Card>
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <MessageSquare className="h-5 w-5" />
-                      Analysis Overview
-                    </CardTitle>
+                    <CardTitle>Topic Performance</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      <div>
-                        <h4 className="font-semibold mb-2">Key Metrics</h4>
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div>Average Satisfaction: {currentInsight.avg_satisfaction?.toFixed(1)}/5.0</div>
-                          <div>Response Count: {currentInsight.response_count}</div>
-                          <div>Overall Sentiment: {currentInsight.overall_sentiment}</div>
-                          <div>Completed Analyses: {currentInsight.completed_analyses}</div>
+                      {Object.entries(currentInsight.topic_sentiment_map).map(([topic, performance]) => (
+                        <div key={topic} className="flex items-center justify-between p-3 border rounded-lg">
+                          <div>
+                            <p className="font-medium text-gray-900">{topic}</p>
+                            <p className="text-sm text-gray-500">
+                              +{performance.positive_count} positive, -{performance.negative_count} negative
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className={`text-lg font-bold ${getSentimentColor(performance.avg_rating >= 3.5 ? 'positive' : performance.avg_rating >= 2.5 ? 'mixed' : 'negative')}`}>
+                              {performance.avg_rating?.toFixed(1)}
+                            </p>
+                            <p className="text-sm text-gray-500">avg rating</p>
+                          </div>
                         </div>
-                      </div>
+                      ))}
                     </div>
                   </CardContent>
                 </Card>
-
-                {currentInsight.topic_sentiment_map && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Topic Performance</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        {Object.entries(currentInsight.topic_sentiment_map).map(([topic, performance]) => (
-                          <div key={topic} className="flex items-center justify-between p-3 border rounded-lg">
-                            <div>
-                              <p className="font-medium text-gray-900">{topic}</p>
-                              <p className="text-sm text-gray-500">
-                                +{performance.positive_count} positive, -{performance.negative_count} negative
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <p className={`text-lg font-bold ${getSentimentColor(performance.avg_rating >= 3.5 ? 'positive' : performance.avg_rating >= 2.5 ? 'mixed' : 'negative')}`}>
-                                {performance.avg_rating?.toFixed(1)}
-                              </p>
-                              <p className="text-sm text-gray-500">avg rating</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-              </TabsContent>
-
-              <TabsContent value="pain-points">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <AlertTriangle className="h-5 w-5 text-red-500" />
-                      Areas for Improvement
-                    </CardTitle>
-                    <CardDescription>
-                      Key challenges identified from student feedback
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ScrollArea className="h-96">
-                      <div className="space-y-3">
-                        {currentInsight.pain_points && currentInsight.pain_points.length > 0 ? (
-                          currentInsight.pain_points.map((point, index) => (
-                            <div key={index} className="flex items-start gap-3 p-4 border-l-4 border-red-200 bg-red-50 rounded-r-lg">
-                              <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5 flex-shrink-0" />
-                              <p className="text-gray-700">{point}</p>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-gray-500 text-center py-4">No specific pain points identified</p>
-                        )}
-                      </div>
-                    </ScrollArea>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="positive">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <ThumbsUp className="h-5 w-5 text-green-500" />
-                      What's Working Well
-                    </CardTitle>
-                    <CardDescription>
-                      Strengths highlighted by students
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ScrollArea className="h-96">
-                      <div className="space-y-3">
-                        {currentInsight.positive_aspects && currentInsight.positive_aspects.length > 0 ? (
-                          currentInsight.positive_aspects.map((aspect, index) => (
-                            <div key={index} className="flex items-start gap-3 p-4 border-l-4 border-green-200 bg-green-50 rounded-r-lg">
-                              <CheckCircle className="h-5 w-5 text-green-500 mt-0.5 flex-shrink-0" />
-                              <p className="text-gray-700">{aspect}</p>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-gray-500 text-center py-4">No specific positive aspects identified</p>
-                        )}
-                      </div>
-                    </ScrollArea>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="actions">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Lightbulb className="h-5 w-5 text-blue-500" />
-                      Recommended Actions
-                    </CardTitle>
-                    <CardDescription>
-                      AI-generated recommendations based on feedback analysis
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ScrollArea className="h-96">
-                      <div className="space-y-3">
-                        {currentInsight.top_insights && currentInsight.top_insights.length > 0 ? (
-                          currentInsight.top_insights.map((insight, index) => (
-                            <div key={index} className="flex items-start gap-3 p-4 border-l-4 border-blue-200 bg-blue-50 rounded-r-lg">
-                              <Lightbulb className="h-5 w-5 text-blue-500 mt-0.5 flex-shrink-0" />
-                              <div className="flex-1">
-                                <p className="text-gray-700">{insight}</p>
-                                <div className="mt-2 flex gap-2">
-                                  <Badge variant="outline" className="text-xs">AI Insight</Badge>
-                                </div>
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-gray-500 text-center py-4">No specific insights available</p>
-                        )}
-                      </div>
-                    </ScrollArea>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
+              )}
+            </div>
           )}
         </div>
       )}

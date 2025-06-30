@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -30,10 +29,25 @@ interface InsightData {
   topic_sentiment_map?: Record<string, any>;
 }
 
+const fetchChartUrls = async (userId: string, uploadId: string): Promise<string[]> => {
+  try {
+    const res = await fetch(
+      `${API_BASE}/chart-urls?user_id=${userId}&upload_id=${uploadId}`,
+      { method: "GET" }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.chart_urls || [];
+  } catch {
+    return [];
+  }
+};
+
 const DashboardSection = ({ userId }: DashboardSectionProps) => {
   const [surveyHistory, setSurveyHistory] = useState<SurveyData[]>([]);
   const [insights, setInsights] = useState<InsightData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [chartUrlsMap, setChartUrlsMap] = useState<Record<string, string[]>>({});
   const [stats, setStats] = useState({
     totalSurveys: 0,
     totalResponses: 0,
@@ -55,23 +69,34 @@ const DashboardSection = ({ userId }: DashboardSectionProps) => {
       const surveyResponse = await fetch(`${API_BASE}/surveys?user_id=${userId}`);
       if (surveyResponse.ok) {
         const surveyData = await surveyResponse.json();
-        setSurveyHistory(surveyData.surveys || []);
+        const surveys = surveyData.surveys || [];
+        setSurveyHistory(surveys);
 
         // Fetch insights
         const insightsResponse = await fetch(`${API_BASE}/insights?user_id=${userId}`);
         if (insightsResponse.ok) {
           const insightsData = await insightsResponse.json();
-          setInsights(insightsData.insights || []);
+          const insightsArray = insightsData.insights || [];
+          setInsights(insightsArray);
+          
+          // Fetch chart URLs for each insight
+          const chartUrlsObj: Record<string, string[]> = {};
+          for (const insight of insightsArray) {
+            chartUrlsObj[insight.upload_id] = await fetchChartUrls(
+              userId,
+              insight.upload_id
+            );
+          }
+          setChartUrlsMap(chartUrlsObj);
           
           // Calculate stats from insights
-          const insightsArray = insightsData.insights || [];
           const totalResponses = insightsArray.reduce((sum: number, insight: InsightData) => sum + (insight.response_count || 0), 0);
           const totalSatisfaction = insightsArray.reduce((sum: number, insight: InsightData) => sum + (insight.avg_satisfaction || 0), 0);
           const avgSatisfaction = insightsArray.length > 0 ? totalSatisfaction / insightsArray.length : 0;
           const completedAnalyses = insightsArray.filter((insight: InsightData) => insight.avg_satisfaction > 0).length;
 
           setStats({
-            totalSurveys: surveyData.surveys?.length || 0,
+            totalSurveys: surveys.length,
             totalResponses,
             completedAnalyses,
             averageSatisfaction: Number(avgSatisfaction.toFixed(1)),
@@ -239,7 +264,7 @@ const DashboardSection = ({ userId }: DashboardSectionProps) => {
           </CardContent>
         </Card>
 
-        {/* Survey Insights */}
+        {/* Survey Performance */}
         <Card>
           <CardHeader>
             <CardTitle>Survey Performance</CardTitle>
@@ -276,6 +301,50 @@ const DashboardSection = ({ userId }: DashboardSectionProps) => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Survey Charts */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Survey Charts</CardTitle>
+          <CardDescription>Visual analytics for each survey</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-6">
+            {insights.slice(0, 4).map((insight) => (
+              <div key={insight.upload_id} className="border-b pb-6 last:border-b-0">
+                <div className="font-medium mb-4 text-lg">
+                  Survey {insight.upload_id}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {Array.isArray(chartUrlsMap[insight.upload_id]) &&
+                  chartUrlsMap[insight.upload_id].length > 0 ? (
+                    chartUrlsMap[insight.upload_id].map((url, idx) => (
+                      <div key={idx} className="bg-white p-4 rounded-lg border shadow-sm">
+                        <img
+                          src={url}
+                          alt={`Chart ${idx + 1} for Survey ${insight.upload_id}`}
+                          className="w-full rounded-lg border"
+                          style={{ maxHeight: 300, objectFit: "contain" }}
+                          crossOrigin="anonymous"
+                        />
+                      </div>
+                    ))
+                  ) : (
+                    <div className="col-span-full flex items-center justify-center py-8 text-gray-400 text-sm bg-gray-50 rounded-lg">
+                      No charts available for this survey
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {insights.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                No survey data available yet
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };
