@@ -11,6 +11,8 @@ import UploadSection from "@/components/UploadSection";
 import DashboardSection from "@/components/DashboardSection";
 import InsightsSection from "@/components/InsightsSection";
 
+const API_BASE = 'https://mngp6096cl.execute-api.us-east-1.amazonaws.com/Prod';
+
 const Index = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -18,36 +20,103 @@ const Index = () => {
   const [password, setPassword] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('upload');
+  const [userCount, setUserCount] = useState<number | null>(null);
+  const [userInfo, setUserInfo] = useState<any>(null);
 
+  // Fetch user count before login
+  useEffect(() => {
+    if (!isAuthenticated) {
+      fetch(`${API_BASE}/users`)
+        .then(async res => {
+          if (!res.ok) {
+            const text = await res.text();
+            console.error('User count fetch failed:', res.status, text);
+            throw new Error(`User count fetch failed: ${res.status} ${text}`);
+          }
+          return res.json();
+        })
+        .then(data => setUserCount(data.user_count))
+        .catch(e => {
+          console.error('User count error:', e);
+          setUserCount(0);
+        });
+    }
+  }, [isAuthenticated]);
+
+  // Check for existing authentication on load
   useEffect(() => {
     const storedUserId = localStorage.getItem('user_id');
-    if (storedUserId) {
+    const storedEmail = localStorage.getItem('email');
+    if (storedUserId && storedEmail) {
       setUserId(storedUserId);
+      setEmail(storedEmail);
       setIsAuthenticated(true);
     }
   }, []);
 
+  // Fetch user info after login
+  useEffect(() => {
+    if (isAuthenticated && email) {
+      fetch(`${API_BASE}/users?email=${email}`)
+        .then(async res => {
+          if (!res.ok) {
+            const text = await res.text();
+            console.error('User info fetch failed:', res.status, text);
+            throw new Error(`User info fetch failed: ${res.status} ${text}`);
+          }
+          return res.json();
+        })
+        .then(data => setUserInfo(data))
+        .catch(e => {
+          console.error('User info error:', e);
+        });
+    }
+  }, [isAuthenticated, email]);
+
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Simulate API call for demo
-    if (email && password) {
-      const mockUserId = `user_${Date.now()}`;
-      localStorage.setItem('user_id', mockUserId);
-      setUserId(mockUserId);
-      setIsAuthenticated(true);
-      toast.success(authMode === 'login' ? 'Welcome back!' : 'Account created successfully!');
-    } else {
+    if (!email || !password) {
       toast.error('Please fill in all fields');
+      return;
+    }
+
+    try {
+      const endpoint = authMode === 'login' ? `${API_BASE}/login` : `${API_BASE}/register`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      const data = await response.json();
+      
+      if (authMode === 'login' && data.message === 'Login successful') {
+        localStorage.setItem('user_id', data.user_id);
+        localStorage.setItem('email', email);
+        setUserId(data.user_id);
+        setIsAuthenticated(true);
+        toast.success('Welcome back!');
+      } else if (authMode === 'register' && response.ok) {
+        toast.success('Account created successfully! Please login.');
+        setAuthMode('login');
+      } else {
+        toast.error(data.message || 'Authentication failed');
+      }
+    } catch (error) {
+      console.error('Auth error:', error);
+      toast.error('Authentication failed. Please try again.');
     }
   };
 
   const handleLogout = () => {
     localStorage.removeItem('user_id');
+    localStorage.removeItem('email');
     setUserId(null);
     setIsAuthenticated(false);
     setEmail('');
     setPassword('');
+    setUserInfo(null);
     toast.success('Logged out successfully');
   };
 
@@ -95,6 +164,13 @@ const Index = () => {
                 </div>
               </div>
             </div>
+
+            {userCount !== null && (
+              <div className="p-4 bg-white rounded-lg shadow-sm">
+                <p className="text-sm text-gray-600">Platform Users</p>
+                <p className="text-2xl font-bold text-blue-600">{userCount}</p>
+              </div>
+            )}
           </div>
 
           {/* Auth Form */}
@@ -177,6 +253,9 @@ const Index = () => {
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-900">{email}</p>
                 <p className="text-xs text-gray-500">Course Coordinator</p>
+                {userInfo && (
+                  <p className="text-xs text-gray-400">ID: {userId}</p>
+                )}
               </div>
               <Button 
                 variant="outline" 
@@ -210,7 +289,7 @@ const Index = () => {
           </TabsList>
 
           <TabsContent value="upload">
-            <UploadSection userId={userId} />
+            <UploadSection userId={userId} email={email} />
           </TabsContent>
 
           <TabsContent value="dashboard">

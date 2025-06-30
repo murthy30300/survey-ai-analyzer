@@ -2,14 +2,15 @@
 import { useState, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { Upload, FileText, CheckCircle, AlertCircle, Clock } from "lucide-react";
 
+const API_BASE = 'https://mngp6096cl.execute-api.us-east-1.amazonaws.com/Prod';
+
 interface UploadSectionProps {
   userId: string | null;
+  email: string | null;
 }
 
 interface UploadRecord {
@@ -20,7 +21,7 @@ interface UploadRecord {
   progress: number;
 }
 
-const UploadSection = ({ userId }: UploadSectionProps) => {
+const UploadSection = ({ userId, email }: UploadSectionProps) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -59,50 +60,79 @@ const UploadSection = ({ userId }: UploadSectionProps) => {
     }
   };
 
-  const simulateUploadProgress = async (uploadId: string) => {
-    const stages = [
-      { status: 'uploading' as const, progress: 25, duration: 1000 },
-      { status: 'raw' as const, progress: 40, duration: 800 },
-      { status: 'processing' as const, progress: 60, duration: 2000 },
-      { status: 'preprocessed' as const, progress: 80, duration: 1500 },
-      { status: 'analyzed' as const, progress: 95, duration: 1000 },
-      { status: 'completed' as const, progress: 100, duration: 500 },
-    ];
-
-    for (const stage of stages) {
-      await new Promise(resolve => setTimeout(resolve, stage.duration));
-      setUploads(prev => prev.map(upload => 
-        upload.id === uploadId 
-          ? { ...upload, status: stage.status, progress: stage.progress }
-          : upload
-      ));
-      setUploadProgress(stage.progress);
-    }
-    
-    toast.success('Survey analysis completed!');
-    setIsUploading(false);
-    setSelectedFile(null);
-    setUploadProgress(0);
-  };
-
   const handleUpload = async () => {
-    if (!selectedFile || !userId) return;
+    if (!selectedFile || !email) {
+      toast.error('Please select a file and ensure you are logged in');
+      return;
+    }
 
-    const uploadId = `upload_${Date.now()}`;
-    const newUpload: UploadRecord = {
-      id: uploadId,
-      filename: selectedFile.name,
-      status: 'uploading',
-      timestamp: new Date().toLocaleString(),
-      progress: 0
-    };
-
-    setUploads(prev => [newUpload, ...prev]);
     setIsUploading(true);
-    toast.success('Upload started!');
+    setUploadProgress(10);
+    
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64 = (reader.result as string).split(',')[1];
+          setUploadProgress(30);
 
-    // Simulate the upload and processing pipeline
-    simulateUploadProgress(uploadId);
+          const response = await fetch(`${API_BASE}/upload`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email,
+              file: base64,
+              filename: selectedFile.name
+            })
+          });
+
+          setUploadProgress(70);
+          const result = await response.json();
+
+          if (response.ok) {
+            setUploadProgress(100);
+            toast.success('File uploaded successfully! Processing will begin shortly.');
+            
+            // Add to upload history
+            const newUpload: UploadRecord = {
+              id: `upload_${Date.now()}`,
+              filename: selectedFile.name,
+              status: 'raw',
+              timestamp: new Date().toLocaleString(),
+              progress: 100
+            };
+            setUploads(prev => [newUpload, ...prev]);
+            
+            // Reset form
+            setSelectedFile(null);
+            if (fileInputRef.current) {
+              fileInputRef.current.value = '';
+            }
+          } else {
+            throw new Error(result.message || 'Upload failed');
+          }
+        } catch (error) {
+          console.error('Upload error:', error);
+          toast.error('Upload failed. Please try again.');
+        } finally {
+          setIsUploading(false);
+          setUploadProgress(0);
+        }
+      };
+
+      reader.onerror = () => {
+        toast.error('Error reading file');
+        setIsUploading(false);
+        setUploadProgress(0);
+      };
+
+      reader.readAsDataURL(selectedFile);
+    } catch (error) {
+      console.error('Upload error:', error);
+      toast.error('Upload failed. Please try again.');
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
   };
 
   const getStatusIcon = (status: UploadRecord['status']) => {
@@ -207,7 +237,7 @@ const UploadSection = ({ userId }: UploadSectionProps) => {
                     disabled={isUploading}
                     className="bg-blue-600 hover:bg-blue-700"
                   >
-                    {isUploading ? 'Processing...' : 'Start Analysis'}
+                    {isUploading ? 'Uploading...' : 'Start Analysis'}
                   </Button>
                 </div>
               </div>
@@ -215,7 +245,7 @@ const UploadSection = ({ userId }: UploadSectionProps) => {
               {isUploading && (
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Processing survey data...</span>
+                    <span className="text-gray-600">Uploading survey data...</span>
                     <span className="text-gray-900">{uploadProgress}%</span>
                   </div>
                   <Progress value={uploadProgress} className="w-full" />
