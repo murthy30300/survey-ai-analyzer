@@ -56,27 +56,27 @@ const DashboardSection = ({ userId }: DashboardSectionProps) => {
       if (surveyResponse.ok) {
         const surveyData = await surveyResponse.json();
         setSurveyHistory(surveyData.surveys || []);
-      }
 
-      // Fetch insights
-      const insightsResponse = await fetch(`${API_BASE}/insights?user_id=${userId}`);
-      if (insightsResponse.ok) {
-        const insightsData = await insightsResponse.json();
-        setInsights(insightsData.insights || []);
-        
-        // Calculate stats from insights
-        const insightsArray = insightsData.insights || [];
-        const totalResponses = insightsArray.reduce((sum: number, insight: InsightData) => sum + (insight.response_count || 0), 0);
-        const totalSatisfaction = insightsArray.reduce((sum: number, insight: InsightData) => sum + (insight.avg_satisfaction || 0), 0);
-        const avgSatisfaction = insightsArray.length > 0 ? totalSatisfaction / insightsArray.length : 0;
-        const completedAnalyses = insightsArray.filter((insight: InsightData) => insight.avg_satisfaction > 0).length;
+        // Fetch insights
+        const insightsResponse = await fetch(`${API_BASE}/insights?user_id=${userId}`);
+        if (insightsResponse.ok) {
+          const insightsData = await insightsResponse.json();
+          setInsights(insightsData.insights || []);
+          
+          // Calculate stats from insights
+          const insightsArray = insightsData.insights || [];
+          const totalResponses = insightsArray.reduce((sum: number, insight: InsightData) => sum + (insight.response_count || 0), 0);
+          const totalSatisfaction = insightsArray.reduce((sum: number, insight: InsightData) => sum + (insight.avg_satisfaction || 0), 0);
+          const avgSatisfaction = insightsArray.length > 0 ? totalSatisfaction / insightsArray.length : 0;
+          const completedAnalyses = insightsArray.filter((insight: InsightData) => insight.avg_satisfaction > 0).length;
 
-        setStats({
-          totalSurveys: surveyData.surveys?.length || 0,
-          totalResponses,
-          completedAnalyses,
-          averageSatisfaction: Number(avgSatisfaction.toFixed(1)),
-        });
+          setStats({
+            totalSurveys: surveyData.surveys?.length || 0,
+            totalResponses,
+            completedAnalyses,
+            averageSatisfaction: Number(avgSatisfaction.toFixed(1)),
+          });
+        }
       }
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
